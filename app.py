@@ -1,4 +1,3 @@
-```python
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import tensorflow as tf
@@ -16,7 +15,7 @@ import gc
 
 app = Flask(__name__)
 
-# Limit uploaded image size to 10 MB
+# Maximum uploaded image size: 10 MB
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 
 
@@ -64,7 +63,7 @@ MODEL_URL = (
 
 
 # ============================================================
-# DOWNLOAD MODEL IF NEEDED
+# DOWNLOAD MODEL
 # ============================================================
 
 def download_model():
@@ -325,9 +324,13 @@ def classifier_from_features(features):
 
 def preprocess_image(image):
 
-    print("Preprocessing image...")
+    print(
+        "Preprocessing image..."
+    )
 
-    image = image.convert("RGB")
+    image = image.convert(
+        "RGB"
+    )
 
     image = image.resize(
         (224, 224),
@@ -362,14 +365,15 @@ def generate_gradcam_from_features(
     original
 ):
 
-    print("Starting Grad-CAM...")
+    print(
+        "Starting Grad-CAM..."
+    )
 
     try:
 
         # ----------------------------------------------------
-        # Watch only feature map.
-        # This avoids storing the complete EfficientNet
-        # gradient graph and reduces memory usage.
+        # Watch only the feature map.
+        # This reduces memory usage.
         # ----------------------------------------------------
 
         with tf.GradientTape() as tape:
@@ -387,14 +391,17 @@ def generate_gradcam_from_features(
                 predicted_class
             ]
 
+
         print(
             "Calculating Grad-CAM gradients..."
         )
+
 
         grads = tape.gradient(
             class_output,
             conv_outputs
         )
+
 
         if grads is None:
 
@@ -406,7 +413,7 @@ def generate_gradcam_from_features(
 
 
         # ----------------------------------------------------
-        # Global average pooling of gradients
+        # Average gradients
         # ----------------------------------------------------
 
         pooled_grads = tf.reduce_mean(
@@ -454,6 +461,7 @@ def generate_gradcam_from_features(
             max_value.numpy()
         )
 
+
         if max_value <= 0:
 
             print(
@@ -470,7 +478,7 @@ def generate_gradcam_from_features(
 
 
         # ----------------------------------------------------
-        # Convert heatmap to numpy
+        # Convert to NumPy
         # ----------------------------------------------------
 
         heatmap = heatmap.numpy()
@@ -492,7 +500,7 @@ def generate_gradcam_from_features(
 
 
         # ----------------------------------------------------
-        # Convert to 0-255
+        # Convert heatmap to 0-255
         # ----------------------------------------------------
 
         heatmap_uint8 = np.uint8(
@@ -514,6 +522,7 @@ def generate_gradcam_from_features(
             cv2.COLORMAP_JET
         )
 
+
         heatmap_color = cv2.cvtColor(
             heatmap_color,
             cv2.COLOR_BGR2RGB
@@ -521,7 +530,7 @@ def generate_gradcam_from_features(
 
 
         # ----------------------------------------------------
-        # Overlay
+        # Create overlay
         # ----------------------------------------------------
 
         overlay = cv2.addWeighted(
@@ -534,6 +543,8 @@ def generate_gradcam_from_features(
 
 
         # ----------------------------------------------------
+        # Combine:
+        #
         # Original | Heatmap | Explanation
         # ----------------------------------------------------
 
@@ -574,7 +585,7 @@ def generate_gradcam_from_features(
 
 
         # ----------------------------------------------------
-        # Base64
+        # Convert to Base64
         # ----------------------------------------------------
 
         gradcam_base64 = base64.b64encode(
@@ -642,7 +653,7 @@ def predict():
 
         return jsonify({
             "message":
-            "CORS preflight successful"
+                "CORS preflight successful"
         })
 
 
@@ -659,7 +670,7 @@ def predict():
 
 
     # --------------------------------------------------------
-    # Check uploaded image
+    # Check image
     # --------------------------------------------------------
 
     if "image" not in request.files:
@@ -670,7 +681,7 @@ def predict():
 
         return jsonify({
             "error":
-            "No image uploaded"
+                "No image uploaded"
         }), 400
 
 
@@ -706,7 +717,7 @@ def predict():
 
 
         # ----------------------------------------------------
-        # Preprocess
+        # Preprocess image
         # ----------------------------------------------------
 
         img_input = preprocess_image(
@@ -715,28 +726,21 @@ def predict():
 
 
         # ----------------------------------------------------
-        # IMPORTANT:
+        # EfficientNet feature extraction
         #
-        # Instead of:
-        #
-        # model(img_input)
-        #
-        # AND then running EfficientNet AGAIN
-        # for Grad-CAM,
-        #
-        # we run the feature model ONCE.
-        #
-        # This reduces computation and memory.
+        # Only one base-model pass is performed.
         # ----------------------------------------------------
 
         print(
             "Running EfficientNet feature extraction..."
         )
 
+
         conv_outputs = feature_model(
             img_input,
             training=False
         )
+
 
         print(
             "Feature extraction completed."
@@ -744,16 +748,18 @@ def predict():
 
 
         # ----------------------------------------------------
-        # Prediction from the same feature map
+        # Prediction
         # ----------------------------------------------------
 
         print(
             "Starting AI prediction..."
         )
 
+
         predictions_tensor = classifier_from_features(
             conv_outputs
         )
+
 
         predictions = (
             predictions_tensor.numpy()
@@ -798,6 +804,7 @@ def predict():
             prediction_name
         )
 
+
         print(
             "Confidence:",
             confidence
@@ -822,7 +829,7 @@ def predict():
 
 
         # ----------------------------------------------------
-        # Original 224x224 image for Grad-CAM
+        # Original image for Grad-CAM
         # ----------------------------------------------------
 
         original = img_input[
@@ -833,12 +840,13 @@ def predict():
 
 
         # ----------------------------------------------------
-        # Generate Grad-CAM using SAME feature map
+        # Generate Grad-CAM
         # ----------------------------------------------------
 
         print(
             "Generating Grad-CAM..."
         )
+
 
         gradcam = generate_gradcam_from_features(
             conv_outputs,
@@ -861,7 +869,7 @@ def predict():
 
 
         # ----------------------------------------------------
-        # Prepare response
+        # Response
         # ----------------------------------------------------
 
         response_data = {
@@ -929,10 +937,12 @@ def predict():
             "=========================================="
         )
 
+
         print(
             "ERROR:",
             str(e)
         )
+
 
         gc.collect()
 
@@ -954,9 +964,16 @@ def predict():
 def health():
 
     return jsonify({
-        "status": "healthy",
-        "model": "EfficientNetB0",
-        "message": "AI Diabetic Retinopathy backend is running."
+
+        "status":
+            "healthy",
+
+        "model":
+            "EfficientNetB0",
+
+        "message":
+            "AI Diabetic Retinopathy backend is running."
+
     })
 
 
@@ -986,4 +1003,3 @@ if __name__ == "__main__":
         port=5000,
         debug=True
     )
-```

@@ -1,3 +1,4 @@
+```python
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import tensorflow as tf
@@ -9,11 +10,19 @@ import os
 import requests
 import gc
 
+# ============================================================
+# FLASK APP
+# ============================================================
+
 app = Flask(__name__)
 
-# --------------------------------------------------
+# Limit uploaded image size to 10 MB
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
+
+
+# ============================================================
 # CORS
-# --------------------------------------------------
+# ============================================================
 
 CORS(
     app,
@@ -31,17 +40,17 @@ def add_cors_headers(response):
     return response
 
 
-# --------------------------------------------------
-# TensorFlow CPU settings
-# --------------------------------------------------
+# ============================================================
+# TENSORFLOW CPU SETTINGS
+# ============================================================
 
 tf.config.threading.set_intra_op_parallelism_threads(1)
 tf.config.threading.set_inter_op_parallelism_threads(1)
 
 
-# --------------------------------------------------
-# Model
-# --------------------------------------------------
+# ============================================================
+# MODEL SETTINGS
+# ============================================================
 
 MODEL_PATH = "best_ai_dr_efficientnetb0_85_29.keras"
 
@@ -53,6 +62,10 @@ MODEL_URL = (
     "best_ai_dr_efficientnetb0_85_29.keras"
 )
 
+
+# ============================================================
+# DOWNLOAD MODEL IF NEEDED
+# ============================================================
 
 def download_model():
 
@@ -85,9 +98,9 @@ def download_model():
 download_model()
 
 
-# --------------------------------------------------
-# Load model
-# --------------------------------------------------
+# ============================================================
+# LOAD MODEL
+# ============================================================
 
 print("Loading AI DR model...")
 
@@ -98,9 +111,9 @@ model = tf.keras.models.load_model(
 print("AI DR model loaded successfully!")
 
 
-# --------------------------------------------------
-# Disease classes
-# --------------------------------------------------
+# ============================================================
+# DISEASE CLASSES
+# ============================================================
 
 class_names = [
     "No Diabetic Retinopathy",
@@ -111,52 +124,85 @@ class_names = [
 ]
 
 
-# --------------------------------------------------
-# Disease information
-# --------------------------------------------------
+# ============================================================
+# DISEASE INFORMATION
+# ============================================================
 
 disease_info = {
 
     "No Diabetic Retinopathy": {
+
         "description":
             "No visible signs of diabetic retinopathy were detected.",
-        "next_steps":
-            "Continue regular diabetes and eye-health monitoring."
+
+        "next_steps": [
+            "Continue regular diabetes monitoring.",
+            "Maintain healthy blood glucose and blood pressure levels.",
+            "Continue regular eye examinations."
+        ]
     },
+
 
     "Mild Diabetic Retinopathy": {
+
         "description":
             "Early retinal changes associated with diabetic retinopathy were detected.",
-        "next_steps":
-            "Maintain good blood glucose and blood pressure control and arrange regular eye examinations."
+
+        "next_steps": [
+            "Maintain good blood glucose control.",
+            "Maintain good blood pressure control.",
+            "Arrange regular eye examinations.",
+            "Follow your healthcare professional's advice."
+        ]
     },
+
 
     "Moderate Diabetic Retinopathy": {
+
         "description":
             "Moderate retinal changes consistent with diabetic retinopathy were detected.",
-        "next_steps":
-            "Consult an eye-care professional for a detailed retinal examination and appropriate follow-up."
+
+        "next_steps": [
+            "Consult an eye-care professional for a detailed retinal examination.",
+            "Maintain good blood glucose control.",
+            "Maintain good blood pressure control.",
+            "Follow the recommended eye-care follow-up schedule."
+        ]
     },
+
 
     "Severe Diabetic Retinopathy": {
+
         "description":
             "Significant retinal abnormalities were detected.",
-        "next_steps":
-            "Prompt evaluation by an ophthalmologist is recommended."
+
+        "next_steps": [
+            "Prompt evaluation by an ophthalmologist is recommended.",
+            "Do not delay professional eye examination.",
+            "Maintain good blood glucose and blood pressure control.",
+            "Follow the ophthalmologist's recommended treatment plan."
+        ]
     },
 
+
     "Proliferative Diabetic Retinopathy": {
+
         "description":
             "Advanced retinal changes associated with proliferative diabetic retinopathy were detected.",
-        "next_steps":
-            "Prompt ophthalmologist evaluation is recommended because advanced disease may require treatment."
+
+        "next_steps": [
+            "Prompt ophthalmologist evaluation is recommended.",
+            "Advanced disease may require medical treatment.",
+            "Do not delay professional eye examination.",
+            "Maintain good blood glucose and blood pressure control."
+        ]
     }
 }
 
 
-# --------------------------------------------------
-# EfficientNet Grad-CAM setup
-# --------------------------------------------------
+# ============================================================
+# EFFICIENTNET BASE MODEL
+# ============================================================
 
 base_model = model.layers[0]
 
@@ -166,9 +212,11 @@ print(
 )
 
 
-# --------------------------------------------------
-# Find Grad-CAM feature layer
-# --------------------------------------------------
+# ============================================================
+# FIND GRAD-CAM FEATURE LAYER
+# ============================================================
+
+last_conv_layer = None
 
 try:
 
@@ -194,8 +242,6 @@ except Exception:
 
     except Exception:
 
-        last_conv_layer = None
-
         for layer in reversed(
             base_model.layers
         ):
@@ -206,6 +252,7 @@ except Exception:
             ):
 
                 last_conv_layer = layer
+
                 break
 
 
@@ -222,9 +269,9 @@ print(
 )
 
 
-# --------------------------------------------------
-# Feature model
-# --------------------------------------------------
+# ============================================================
+# FEATURE MODEL
+# ============================================================
 
 feature_model = tf.keras.models.Model(
     inputs=base_model.input,
@@ -232,9 +279,9 @@ feature_model = tf.keras.models.Model(
 )
 
 
-# --------------------------------------------------
-# Classification layers
-# --------------------------------------------------
+# ============================================================
+# CLASSIFICATION HEAD
+# ============================================================
 
 gap = model.layers[1]
 
@@ -249,9 +296,7 @@ drop2 = model.layers[5]
 pred_layer = model.layers[6]
 
 
-def classifier_from_features(
-    features
-):
+def classifier_from_features(features):
 
     x = gap(features)
 
@@ -274,21 +319,15 @@ def classifier_from_features(
     return predictions
 
 
-# --------------------------------------------------
-# Image preprocessing
-# --------------------------------------------------
+# ============================================================
+# IMAGE PREPROCESSING
+# ============================================================
 
-def preprocess_image(
-    image
-):
+def preprocess_image(image):
 
-    print(
-        "Preprocessing image..."
-    )
+    print("Preprocessing image...")
 
-    image = image.convert(
-        "RGB"
-    )
+    image = image.convert("RGB")
 
     image = image.resize(
         (224, 224),
@@ -313,39 +352,25 @@ def preprocess_image(
     return image
 
 
-# --------------------------------------------------
-# MEMORY-EFFICIENT GRAD-CAM
-# --------------------------------------------------
+# ============================================================
+# GRAD-CAM
+# ============================================================
 
-def generate_gradcam(
-    img_input,
-    predicted_class
+def generate_gradcam_from_features(
+    conv_outputs,
+    predicted_class,
+    original
 ):
 
-    print(
-        "Starting Grad-CAM..."
-    )
+    print("Starting Grad-CAM...")
 
     try:
 
-        # --------------------------------------------------
-        # IMPORTANT:
-        # Generate feature maps OUTSIDE GradientTape.
-        # This greatly reduces memory usage.
-        # --------------------------------------------------
-
-        conv_outputs = feature_model(
-            img_input,
-            training=False
-        )
-
-        print(
-            "Feature map generated."
-        )
-
-        # --------------------------------------------------
-        # GradientTape only watches feature map
-        # --------------------------------------------------
+        # ----------------------------------------------------
+        # Watch only feature map.
+        # This avoids storing the complete EfficientNet
+        # gradient graph and reduces memory usage.
+        # ----------------------------------------------------
 
         with tf.GradientTape() as tape:
 
@@ -380,9 +405,9 @@ def generate_gradcam(
             return None
 
 
-        # --------------------------------------------------
-        # Average gradients
-        # --------------------------------------------------
+        # ----------------------------------------------------
+        # Global average pooling of gradients
+        # ----------------------------------------------------
 
         pooled_grads = tf.reduce_mean(
             grads,
@@ -390,27 +415,26 @@ def generate_gradcam(
         )
 
 
-        # --------------------------------------------------
+        # ----------------------------------------------------
         # Remove batch dimension
-        # --------------------------------------------------
+        # ----------------------------------------------------
 
         conv_output = conv_outputs[0]
 
 
-        # --------------------------------------------------
-        # Weighted feature map
-        # --------------------------------------------------
+        # ----------------------------------------------------
+        # Weighted activation map
+        # ----------------------------------------------------
 
         heatmap = tf.reduce_sum(
-            conv_output *
-            pooled_grads,
+            conv_output * pooled_grads,
             axis=-1
         )
 
 
-        # --------------------------------------------------
+        # ----------------------------------------------------
         # ReLU
-        # --------------------------------------------------
+        # ----------------------------------------------------
 
         heatmap = tf.maximum(
             heatmap,
@@ -418,9 +442,9 @@ def generate_gradcam(
         )
 
 
-        # --------------------------------------------------
+        # ----------------------------------------------------
         # Normalize
-        # --------------------------------------------------
+        # ----------------------------------------------------
 
         max_value = tf.reduce_max(
             heatmap
@@ -445,32 +469,20 @@ def generate_gradcam(
         )
 
 
-        # --------------------------------------------------
-        # Convert to numpy
-        # --------------------------------------------------
+        # ----------------------------------------------------
+        # Convert heatmap to numpy
+        # ----------------------------------------------------
 
         heatmap = heatmap.numpy()
 
 
-        # --------------------------------------------------
-        # Original image
-        # --------------------------------------------------
-
-        original = img_input[
-            0
-        ].astype(
-            np.uint8
-        )
-
+        # ----------------------------------------------------
+        # Resize heatmap
+        # ----------------------------------------------------
 
         height, width = (
             original.shape[:2]
         )
-
-
-        # --------------------------------------------------
-        # Resize heatmap
-        # --------------------------------------------------
 
         heatmap = cv2.resize(
             heatmap,
@@ -479,9 +491,9 @@ def generate_gradcam(
         )
 
 
-        # --------------------------------------------------
-        # Convert heatmap to 0-255
-        # --------------------------------------------------
+        # ----------------------------------------------------
+        # Convert to 0-255
+        # ----------------------------------------------------
 
         heatmap_uint8 = np.uint8(
             255 *
@@ -493,15 +505,14 @@ def generate_gradcam(
         )
 
 
-        # --------------------------------------------------
-        # Create color heatmap
-        # --------------------------------------------------
+        # ----------------------------------------------------
+        # Create colored heatmap
+        # ----------------------------------------------------
 
         heatmap_color = cv2.applyColorMap(
             heatmap_uint8,
             cv2.COLORMAP_JET
         )
-
 
         heatmap_color = cv2.cvtColor(
             heatmap_color,
@@ -509,9 +520,9 @@ def generate_gradcam(
         )
 
 
-        # --------------------------------------------------
+        # ----------------------------------------------------
         # Overlay
-        # --------------------------------------------------
+        # ----------------------------------------------------
 
         overlay = cv2.addWeighted(
             original,
@@ -522,10 +533,9 @@ def generate_gradcam(
         )
 
 
-        # --------------------------------------------------
-        # Combine:
+        # ----------------------------------------------------
         # Original | Heatmap | Explanation
-        # --------------------------------------------------
+        # ----------------------------------------------------
 
         combined = np.concatenate(
             [
@@ -537,9 +547,9 @@ def generate_gradcam(
         )
 
 
-        # --------------------------------------------------
-        # Compress image
-        # --------------------------------------------------
+        # ----------------------------------------------------
+        # JPEG compression
+        # ----------------------------------------------------
 
         success, buffer = cv2.imencode(
             ".jpg",
@@ -549,7 +559,7 @@ def generate_gradcam(
             ),
             [
                 cv2.IMWRITE_JPEG_QUALITY,
-                75
+                70
             ]
         )
 
@@ -563,9 +573,9 @@ def generate_gradcam(
             return None
 
 
-        # --------------------------------------------------
+        # ----------------------------------------------------
         # Base64
-        # --------------------------------------------------
+        # ----------------------------------------------------
 
         gradcam_base64 = base64.b64encode(
             buffer
@@ -579,11 +589,10 @@ def generate_gradcam(
         )
 
 
-        # --------------------------------------------------
+        # ----------------------------------------------------
         # Cleanup
-        # --------------------------------------------------
+        # ----------------------------------------------------
 
-        del conv_outputs
         del predictions
         del grads
         del pooled_grads
@@ -612,9 +621,9 @@ def generate_gradcam(
         return None
 
 
-# --------------------------------------------------
-# Prediction API
-# --------------------------------------------------
+# ============================================================
+# PREDICTION API
+# ============================================================
 
 @app.route(
     "/predict",
@@ -625,9 +634,9 @@ def generate_gradcam(
 )
 def predict():
 
-    # --------------------------------------------------
+    # --------------------------------------------------------
     # CORS preflight
-    # --------------------------------------------------
+    # --------------------------------------------------------
 
     if request.method == "OPTIONS":
 
@@ -649,9 +658,9 @@ def predict():
     )
 
 
-    # --------------------------------------------------
-    # Check image
-    # --------------------------------------------------
+    # --------------------------------------------------------
+    # Check uploaded image
+    # --------------------------------------------------------
 
     if "image" not in request.files:
 
@@ -667,14 +676,13 @@ def predict():
 
     try:
 
-        # --------------------------------------------------
+        # ----------------------------------------------------
         # Receive image
-        # --------------------------------------------------
+        # ----------------------------------------------------
 
         file = request.files[
             "image"
         ]
-
 
         print(
             "Filename:",
@@ -682,9 +690,9 @@ def predict():
         )
 
 
-        # --------------------------------------------------
+        # ----------------------------------------------------
         # Open image
-        # --------------------------------------------------
+        # ----------------------------------------------------
 
         image = Image.open(
             file.stream
@@ -692,35 +700,60 @@ def predict():
             "RGB"
         )
 
-
         print(
             "Image opened successfully."
         )
 
 
-        # --------------------------------------------------
+        # ----------------------------------------------------
         # Preprocess
-        # --------------------------------------------------
+        # ----------------------------------------------------
 
         img_input = preprocess_image(
             image
         )
 
 
-        # --------------------------------------------------
-        # AI prediction
-        # --------------------------------------------------
+        # ----------------------------------------------------
+        # IMPORTANT:
+        #
+        # Instead of:
+        #
+        # model(img_input)
+        #
+        # AND then running EfficientNet AGAIN
+        # for Grad-CAM,
+        #
+        # we run the feature model ONCE.
+        #
+        # This reduces computation and memory.
+        # ----------------------------------------------------
+
+        print(
+            "Running EfficientNet feature extraction..."
+        )
+
+        conv_outputs = feature_model(
+            img_input,
+            training=False
+        )
+
+        print(
+            "Feature extraction completed."
+        )
+
+
+        # ----------------------------------------------------
+        # Prediction from the same feature map
+        # ----------------------------------------------------
 
         print(
             "Starting AI prediction..."
         )
 
-
-        predictions_tensor = model(
-            img_input,
-            training=False
+        predictions_tensor = classifier_from_features(
+            conv_outputs
         )
-
 
         predictions = (
             predictions_tensor.numpy()
@@ -733,9 +766,9 @@ def predict():
         )
 
 
-        # --------------------------------------------------
+        # ----------------------------------------------------
         # Predicted class
-        # --------------------------------------------------
+        # ----------------------------------------------------
 
         predicted_class = int(
             np.argmax(
@@ -744,9 +777,9 @@ def predict():
         )
 
 
-        # --------------------------------------------------
+        # ----------------------------------------------------
         # Confidence
-        # --------------------------------------------------
+        # ----------------------------------------------------
 
         confidence = float(
             predictions[0][
@@ -765,49 +798,52 @@ def predict():
             prediction_name
         )
 
-
         print(
             "Confidence:",
             confidence
         )
 
 
-        # --------------------------------------------------
+        # ----------------------------------------------------
         # Disease information
-        # --------------------------------------------------
+        # ----------------------------------------------------
 
         info = disease_info.get(
             prediction_name,
             {
                 "description":
                     "Prediction completed.",
-                "next_steps":
+
+                "next_steps": [
                     "Please consult a qualified eye-care professional for medical interpretation."
+                ]
             }
         )
 
 
-        # --------------------------------------------------
-        # Delete prediction tensor BEFORE Grad-CAM
-        # --------------------------------------------------
+        # ----------------------------------------------------
+        # Original 224x224 image for Grad-CAM
+        # ----------------------------------------------------
 
-        del predictions_tensor
+        original = img_input[
+            0
+        ].astype(
+            np.uint8
+        )
 
-        gc.collect()
 
-
-        # --------------------------------------------------
-        # Grad-CAM
-        # --------------------------------------------------
+        # ----------------------------------------------------
+        # Generate Grad-CAM using SAME feature map
+        # ----------------------------------------------------
 
         print(
             "Generating Grad-CAM..."
         )
 
-
-        gradcam = generate_gradcam(
-            img_input,
-            predicted_class
+        gradcam = generate_gradcam_from_features(
+            conv_outputs,
+            predicted_class,
+            original
         )
 
 
@@ -824,9 +860,9 @@ def predict():
             )
 
 
-        # --------------------------------------------------
-        # Response
-        # --------------------------------------------------
+        # ----------------------------------------------------
+        # Prepare response
+        # ----------------------------------------------------
 
         response_data = {
 
@@ -852,13 +888,16 @@ def predict():
         )
 
 
-        # --------------------------------------------------
+        # ----------------------------------------------------
         # Cleanup
-        # --------------------------------------------------
+        # ----------------------------------------------------
 
-        del image
-        del img_input
+        del predictions_tensor
         del predictions
+        del conv_outputs
+        del img_input
+        del image
+        del original
 
         gc.collect()
 
@@ -890,25 +929,40 @@ def predict():
             "=========================================="
         )
 
-
         print(
             "ERROR:",
             str(e)
         )
-
 
         gc.collect()
 
 
         return jsonify({
             "error":
-            str(e)
+                str(e)
         }), 500
 
 
-# --------------------------------------------------
-# Home route
-# --------------------------------------------------
+# ============================================================
+# HEALTH CHECK
+# ============================================================
+
+@app.route(
+    "/health",
+    methods=["GET"]
+)
+def health():
+
+    return jsonify({
+        "status": "healthy",
+        "model": "EfficientNetB0",
+        "message": "AI Diabetic Retinopathy backend is running."
+    })
+
+
+# ============================================================
+# HOME
+# ============================================================
 
 @app.route("/")
 def home():
@@ -916,14 +970,14 @@ def home():
     return jsonify({
 
         "message":
-        "AI Diabetic Retinopathy Backend is running!"
+            "AI Diabetic Retinopathy Backend is running!"
 
     })
 
 
-# --------------------------------------------------
-# Local development
-# --------------------------------------------------
+# ============================================================
+# LOCAL DEVELOPMENT
+# ============================================================
 
 if __name__ == "__main__":
 
@@ -932,3 +986,4 @@ if __name__ == "__main__":
         port=5000,
         debug=True
     )
+```

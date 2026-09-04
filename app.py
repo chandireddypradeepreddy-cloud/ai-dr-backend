@@ -1,3 +1,4 @@
+```python
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -18,14 +19,46 @@ import gc
 
 app = Flask(__name__)
 
+
+# ==========================================
+# CORS CONFIGURATION
+# ==========================================
+
 CORS(
     app,
     resources={
         r"/*": {
-            "origins": "*"
+            "origins": [
+                "https://endearing-cheesecake-55632e.netlify.app"
+            ]
         }
-    }
+    },
+    methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
+    expose_headers=["Content-Type"]
 )
+
+
+# ==========================================
+# EXTRA CORS HEADERS
+# ==========================================
+
+@app.after_request
+def add_cors_headers(response):
+
+    response.headers["Access-Control-Allow-Origin"] = (
+        "https://endearing-cheesecake-55632e.netlify.app"
+    )
+
+    response.headers["Access-Control-Allow-Headers"] = (
+        "Content-Type"
+    )
+
+    response.headers["Access-Control-Allow-Methods"] = (
+        "GET, POST, OPTIONS"
+    )
+
+    return response
 
 
 # ==========================================
@@ -80,7 +113,6 @@ def download_model():
         ):
 
             if chunk:
-
                 file.write(chunk)
 
     print("Model downloaded successfully!")
@@ -123,7 +155,6 @@ base_model = model.layers[0]
 
 last_conv_layer = None
 
-
 for layer in reversed(base_model.layers):
 
     if isinstance(
@@ -164,15 +195,10 @@ feature_model = tf.keras.models.Model(
 # ==========================================
 
 gap = model.layers[1]
-
 dense1 = model.layers[2]
-
 drop1 = model.layers[3]
-
 dense2 = model.layers[4]
-
 drop2 = model.layers[5]
-
 pred_layer = model.layers[6]
 
 
@@ -267,7 +293,6 @@ def generate_gradcam(img_input):
 
 
     print("Calculating Grad-CAM gradients...")
-
 
     grads = tape.gradient(
         class_output,
@@ -438,9 +463,20 @@ def generate_gradcam(img_input):
 
 @app.route(
     "/predict",
-    methods=["POST"]
+    methods=["POST", "OPTIONS"]
 )
 def predict():
+
+    # ======================================
+    # HANDLE CORS PREFLIGHT
+    # ======================================
+
+    if request.method == "OPTIONS":
+
+        return jsonify({
+            "message": "CORS preflight successful"
+        })
+
 
     print("")
     print("==========================================")
@@ -645,3 +681,4 @@ if __name__ == "__main__":
         port=5000,
         debug=True
     )
+```

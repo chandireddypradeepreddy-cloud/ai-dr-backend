@@ -15,7 +15,6 @@ import gc
 
 app = Flask(__name__)
 
-# Maximum uploaded image size: 10 MB
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 
 
@@ -40,7 +39,7 @@ def add_cors_headers(response):
 
 
 # ============================================================
-# TENSORFLOW CPU SETTINGS
+# TENSORFLOW SETTINGS
 # ============================================================
 
 tf.config.threading.set_intra_op_parallelism_threads(1)
@@ -141,7 +140,6 @@ disease_info = {
         ]
     },
 
-
     "Mild Diabetic Retinopathy": {
 
         "description":
@@ -154,7 +152,6 @@ disease_info = {
             "Follow your healthcare professional's advice."
         ]
     },
-
 
     "Moderate Diabetic Retinopathy": {
 
@@ -169,7 +166,6 @@ disease_info = {
         ]
     },
 
-
     "Severe Diabetic Retinopathy": {
 
         "description":
@@ -182,7 +178,6 @@ disease_info = {
             "Follow the ophthalmologist's recommended treatment plan."
         ]
     },
-
 
     "Proliferative Diabetic Retinopathy": {
 
@@ -251,7 +246,6 @@ except Exception:
             ):
 
                 last_conv_layer = layer
-
                 break
 
 
@@ -324,13 +318,9 @@ def classifier_from_features(features):
 
 def preprocess_image(image):
 
-    print(
-        "Preprocessing image..."
-    )
+    print("Preprocessing image...")
 
-    image = image.convert(
-        "RGB"
-    )
+    image = image.convert("RGB")
 
     image = image.resize(
         (224, 224),
@@ -365,16 +355,9 @@ def generate_gradcam_from_features(
     original
 ):
 
-    print(
-        "Starting Grad-CAM..."
-    )
+    print("Starting Grad-CAM...")
 
     try:
-
-        # ----------------------------------------------------
-        # Watch only the feature map.
-        # This reduces memory usage.
-        # ----------------------------------------------------
 
         with tf.GradientTape() as tape:
 
@@ -391,17 +374,14 @@ def generate_gradcam_from_features(
                 predicted_class
             ]
 
-
         print(
             "Calculating Grad-CAM gradients..."
         )
-
 
         grads = tape.gradient(
             class_output,
             conv_outputs
         )
-
 
         if grads is None:
 
@@ -411,47 +391,22 @@ def generate_gradcam_from_features(
 
             return None
 
-
-        # ----------------------------------------------------
-        # Average gradients
-        # ----------------------------------------------------
-
         pooled_grads = tf.reduce_mean(
             grads,
             axis=(0, 1, 2)
         )
 
-
-        # ----------------------------------------------------
-        # Remove batch dimension
-        # ----------------------------------------------------
-
         conv_output = conv_outputs[0]
-
-
-        # ----------------------------------------------------
-        # Weighted activation map
-        # ----------------------------------------------------
 
         heatmap = tf.reduce_sum(
             conv_output * pooled_grads,
             axis=-1
         )
 
-
-        # ----------------------------------------------------
-        # ReLU
-        # ----------------------------------------------------
-
         heatmap = tf.maximum(
             heatmap,
             0
         )
-
-
-        # ----------------------------------------------------
-        # Normalize
-        # ----------------------------------------------------
 
         max_value = tf.reduce_max(
             heatmap
@@ -461,7 +416,6 @@ def generate_gradcam_from_features(
             max_value.numpy()
         )
 
-
         if max_value <= 0:
 
             print(
@@ -470,23 +424,12 @@ def generate_gradcam_from_features(
 
             return None
 
-
         heatmap = (
             heatmap /
             max_value
         )
 
-
-        # ----------------------------------------------------
-        # Convert to NumPy
-        # ----------------------------------------------------
-
         heatmap = heatmap.numpy()
-
-
-        # ----------------------------------------------------
-        # Resize heatmap
-        # ----------------------------------------------------
 
         height, width = (
             original.shape[:2]
@@ -498,11 +441,6 @@ def generate_gradcam_from_features(
             interpolation=cv2.INTER_LINEAR
         )
 
-
-        # ----------------------------------------------------
-        # Convert heatmap to 0-255
-        # ----------------------------------------------------
-
         heatmap_uint8 = np.uint8(
             255 *
             np.clip(
@@ -512,26 +450,15 @@ def generate_gradcam_from_features(
             )
         )
 
-
-        # ----------------------------------------------------
-        # Create colored heatmap
-        # ----------------------------------------------------
-
         heatmap_color = cv2.applyColorMap(
             heatmap_uint8,
             cv2.COLORMAP_JET
         )
 
-
         heatmap_color = cv2.cvtColor(
             heatmap_color,
             cv2.COLOR_BGR2RGB
         )
-
-
-        # ----------------------------------------------------
-        # Create overlay
-        # ----------------------------------------------------
 
         overlay = cv2.addWeighted(
             original,
@@ -541,13 +468,6 @@ def generate_gradcam_from_features(
             0
         )
 
-
-        # ----------------------------------------------------
-        # Combine:
-        #
-        # Original | Heatmap | Explanation
-        # ----------------------------------------------------
-
         combined = np.concatenate(
             [
                 original,
@@ -556,11 +476,6 @@ def generate_gradcam_from_features(
             ],
             axis=1
         )
-
-
-        # ----------------------------------------------------
-        # JPEG compression
-        # ----------------------------------------------------
 
         success, buffer = cv2.imencode(
             ".jpg",
@@ -574,7 +489,6 @@ def generate_gradcam_from_features(
             ]
         )
 
-
         if not success:
 
             print(
@@ -583,26 +497,13 @@ def generate_gradcam_from_features(
 
             return None
 
-
-        # ----------------------------------------------------
-        # Convert to Base64
-        # ----------------------------------------------------
-
         gradcam_base64 = base64.b64encode(
             buffer
-        ).decode(
-            "utf-8"
-        )
-
+        ).decode("utf-8")
 
         print(
             "Grad-CAM completed successfully."
         )
-
-
-        # ----------------------------------------------------
-        # Cleanup
-        # ----------------------------------------------------
 
         del predictions
         del grads
@@ -616,9 +517,7 @@ def generate_gradcam_from_features(
 
         gc.collect()
 
-
         return gradcam_base64
-
 
     except Exception as e:
 
@@ -645,17 +544,12 @@ def generate_gradcam_from_features(
 )
 def predict():
 
-    # --------------------------------------------------------
-    # CORS preflight
-    # --------------------------------------------------------
-
     if request.method == "OPTIONS":
 
         return jsonify({
             "message":
                 "CORS preflight successful"
         })
-
 
     print("")
     print(
@@ -668,11 +562,6 @@ def predict():
         "=========================================="
     )
 
-
-    # --------------------------------------------------------
-    # Check image
-    # --------------------------------------------------------
-
     if "image" not in request.files:
 
         print(
@@ -684,68 +573,43 @@ def predict():
                 "No image uploaded"
         }), 400
 
-
     try:
 
-        # ----------------------------------------------------
-        # Receive image
-        # ----------------------------------------------------
-
-        file = request.files[
-            "image"
-        ]
+        file = request.files["image"]
 
         print(
             "Filename:",
             file.filename
         )
 
-
-        # ----------------------------------------------------
-        # Open image
-        # ----------------------------------------------------
-
         image = Image.open(
             file.stream
-        ).convert(
-            "RGB"
-        )
+        ).convert("RGB")
 
         print(
             "Image opened successfully."
         )
 
-
-        # ----------------------------------------------------
-        # Preprocess image
-        # ----------------------------------------------------
-
         img_input = preprocess_image(
             image
         )
 
-
         # ----------------------------------------------------
-        # EfficientNet feature extraction
-        #
-        # Only one base-model pass is performed.
+        # Feature extraction
         # ----------------------------------------------------
 
         print(
             "Running EfficientNet feature extraction..."
         )
 
-
         conv_outputs = feature_model(
             img_input,
             training=False
         )
 
-
         print(
             "Feature extraction completed."
         )
-
 
         # ----------------------------------------------------
         # Prediction
@@ -755,26 +619,18 @@ def predict():
             "Starting AI prediction..."
         )
 
-
         predictions_tensor = classifier_from_features(
             conv_outputs
         )
-
 
         predictions = (
             predictions_tensor.numpy()
         )
 
-
         print(
             "Raw prediction:",
             predictions
         )
-
-
-        # ----------------------------------------------------
-        # Predicted class
-        # ----------------------------------------------------
 
         predicted_class = int(
             np.argmax(
@@ -782,34 +638,25 @@ def predict():
             )
         )
 
-
-        # ----------------------------------------------------
-        # Confidence
-        # ----------------------------------------------------
-
         confidence = float(
             predictions[0][
                 predicted_class
             ] * 100
         )
 
-
         prediction_name = class_names[
             predicted_class
         ]
-
 
         print(
             "Prediction:",
             prediction_name
         )
 
-
         print(
             "Confidence:",
             confidence
         )
-
 
         # ----------------------------------------------------
         # Disease information
@@ -827,9 +674,8 @@ def predict():
             }
         )
 
-
         # ----------------------------------------------------
-        # Original image for Grad-CAM
+        # Original image
         # ----------------------------------------------------
 
         original = img_input[
@@ -838,22 +684,19 @@ def predict():
             np.uint8
         )
 
-
         # ----------------------------------------------------
-        # Generate Grad-CAM
+        # Grad-CAM
         # ----------------------------------------------------
 
         print(
             "Generating Grad-CAM..."
         )
 
-
         gradcam = generate_gradcam_from_features(
             conv_outputs,
             predicted_class,
             original
         )
-
 
         if gradcam is not None:
 
@@ -866,7 +709,6 @@ def predict():
             print(
                 "Grad-CAM unavailable."
             )
-
 
         # ----------------------------------------------------
         # Response
@@ -890,15 +732,9 @@ def predict():
                 gradcam
         }
 
-
         print(
             "Sending response to frontend..."
         )
-
-
-        # ----------------------------------------------------
-        # Cleanup
-        # ----------------------------------------------------
 
         del predictions_tensor
         del predictions
@@ -909,7 +745,6 @@ def predict():
 
         gc.collect()
 
-
         print(
             "Response ready."
         )
@@ -918,11 +753,9 @@ def predict():
             "=========================================="
         )
 
-
         return jsonify(
             response_data
         )
-
 
     except Exception as e:
 
@@ -937,15 +770,12 @@ def predict():
             "=========================================="
         )
 
-
         print(
             "ERROR:",
             str(e)
         )
 
-
         gc.collect()
-
 
         return jsonify({
             "error":

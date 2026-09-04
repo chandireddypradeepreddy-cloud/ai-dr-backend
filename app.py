@@ -1,13 +1,18 @@
+import os
+import gc
+import base64
+import io
+
+import numpy as np
+import tensorflow as tf
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import tensorflow as tf
-import numpy as np
 from PIL import Image
-import base64
-import cv2
-import os
-import requests
-import gc
+
+from tensorflow.keras.models import load_model, Model
+from tensorflow.keras.layers import Conv2D
+
 
 # ============================================================
 # FLASK APP
@@ -15,244 +20,80 @@ import gc
 
 app = Flask(__name__)
 
+# Allow frontend requests
+CORS(app)
+
+# Maximum uploaded image size: 10 MB
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 
 
 # ============================================================
-# CORS
+# TENSORFLOW MEMORY / CPU SETTINGS
 # ============================================================
 
-CORS(
-    app,
-    resources={r"/*": {"origins": "*"}},
-    methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type"]
-)
-
-
-@app.after_request
-def add_cors_headers(response):
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    return response
-
-
-# ============================================================
-# TENSORFLOW SETTINGS
-# ============================================================
-
+# Keep TensorFlow from creating unnecessary thread pools
 tf.config.threading.set_intra_op_parallelism_threads(1)
 tf.config.threading.set_inter_op_parallelism_threads(1)
 
 
 # ============================================================
-# MODEL SETTINGS
+# MODEL PATH
 # ============================================================
 
-MODEL_PATH = "best_ai_dr_efficientnetb0_85_29.keras"
-
-MODEL_URL = (
-    "https://github.com/"
-    "chandireddypradeepreddy-cloud/"
-    "ai-dr-backend/"
-    "releases/download/v1.0/"
+MODEL_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
     "best_ai_dr_efficientnetb0_85_29.keras"
 )
-
-
-# ============================================================
-# DOWNLOAD MODEL
-# ============================================================
-
-def download_model():
-
-    if os.path.exists(MODEL_PATH):
-        print("Model file already exists.")
-        return
-
-    print("Downloading AI DR model...")
-
-    response = requests.get(
-        MODEL_URL,
-        stream=True,
-        timeout=300
-    )
-
-    response.raise_for_status()
-
-    with open(MODEL_PATH, "wb") as file:
-
-        for chunk in response.iter_content(
-            chunk_size=1024 * 1024
-        ):
-
-            if chunk:
-                file.write(chunk)
-
-    print("Model downloaded successfully!")
-
-
-download_model()
 
 
 # ============================================================
 # LOAD MODEL
 # ============================================================
 
-print("Loading AI DR model...")
+print("Loading AI Diabetic Retinopathy model...")
 
-model = tf.keras.models.load_model(
-    MODEL_PATH
+model = load_model(
+    MODEL_PATH,
+    compile=False
 )
 
-print("AI DR model loaded successfully!")
+print("Model loaded successfully.")
 
 
 # ============================================================
-# DISEASE CLASSES
-# ============================================================
-
-class_names = [
-    "No Diabetic Retinopathy",
-    "Mild Diabetic Retinopathy",
-    "Moderate Diabetic Retinopathy",
-    "Severe Diabetic Retinopathy",
-    "Proliferative Diabetic Retinopathy"
-]
-
-
-# ============================================================
-# DISEASE INFORMATION
-# ============================================================
-
-disease_info = {
-
-    "No Diabetic Retinopathy": {
-
-        "description":
-            "No visible signs of diabetic retinopathy were detected.",
-
-        "next_steps": [
-            "Continue regular diabetes monitoring.",
-            "Maintain healthy blood glucose and blood pressure levels.",
-            "Continue regular eye examinations."
-        ]
-    },
-
-    "Mild Diabetic Retinopathy": {
-
-        "description":
-            "Early retinal changes associated with diabetic retinopathy were detected.",
-
-        "next_steps": [
-            "Maintain good blood glucose control.",
-            "Maintain good blood pressure control.",
-            "Arrange regular eye examinations.",
-            "Follow your healthcare professional's advice."
-        ]
-    },
-
-    "Moderate Diabetic Retinopathy": {
-
-        "description":
-            "Moderate retinal changes consistent with diabetic retinopathy were detected.",
-
-        "next_steps": [
-            "Consult an eye-care professional for a detailed retinal examination.",
-            "Maintain good blood glucose control.",
-            "Maintain good blood pressure control.",
-            "Follow the recommended eye-care follow-up schedule."
-        ]
-    },
-
-    "Severe Diabetic Retinopathy": {
-
-        "description":
-            "Significant retinal abnormalities were detected.",
-
-        "next_steps": [
-            "Prompt evaluation by an ophthalmologist is recommended.",
-            "Do not delay professional eye examination.",
-            "Maintain good blood glucose and blood pressure control.",
-            "Follow the ophthalmologist's recommended treatment plan."
-        ]
-    },
-
-    "Proliferative Diabetic Retinopathy": {
-
-        "description":
-            "Advanced retinal changes associated with proliferative diabetic retinopathy were detected.",
-
-        "next_steps": [
-            "Prompt ophthalmologist evaluation is recommended.",
-            "Advanced disease may require medical treatment.",
-            "Do not delay professional eye examination.",
-            "Maintain good blood glucose and blood pressure control."
-        ]
-    }
-}
-
-
-# ============================================================
-# EFFICIENTNET BASE MODEL
-# ============================================================
-
-base_model = model.layers[0]
-
-print(
-    "Base model:",
-    base_model.name
-)
-
-
-# ============================================================
-# FIND GRAD-CAM FEATURE LAYER
+# FIND LAST CONVOLUTIONAL LAYER
 # ============================================================
 
 last_conv_layer = None
 
-try:
+for layer in reversed(model.layers):
+    if isinstance(layer, Conv2D):
+        last_conv_layer = layer
+        break
 
-    last_conv_layer = base_model.get_layer(
-        "top_activation"
-    )
-
-    print(
-        "Grad-CAM feature layer: top_activation"
-    )
-
-except Exception:
-
-    try:
-
-        last_conv_layer = base_model.get_layer(
-            "top_conv"
-        )
-
-        print(
-            "Grad-CAM feature layer: top_conv"
-        )
-
-    except Exception:
-
-        for layer in reversed(
-            base_model.layers
-        ):
-
-            if isinstance(
-                layer,
-                tf.keras.layers.Conv2D
-            ):
-
-                last_conv_layer = layer
-                break
-
+# EfficientNet is nested inside Sequential model,
+# so search inside the base model if needed.
 
 if last_conv_layer is None:
 
-    raise Exception(
-        "Could not find convolution layer for Grad-CAM"
+    for layer in model.layers:
+
+        if isinstance(layer, tf.keras.Model):
+
+            for inner_layer in reversed(layer.layers):
+
+                if isinstance(inner_layer, Conv2D):
+
+                    last_conv_layer = inner_layer
+                    break
+
+        if last_conv_layer is not None:
+            break
+
+
+if last_conv_layer is None:
+    raise RuntimeError(
+        "Could not find a convolutional layer for Grad-CAM."
     )
 
 
@@ -263,53 +104,80 @@ print(
 
 
 # ============================================================
-# FEATURE MODEL
+# DISEASE INFORMATION
 # ============================================================
 
-feature_model = tf.keras.models.Model(
-    inputs=base_model.input,
-    outputs=last_conv_layer.output
-)
+disease_info = {
 
+    0: {
+        "name": "No Diabetic Retinopathy",
 
-# ============================================================
-# CLASSIFICATION HEAD
-# ============================================================
+        "description":
+            "The AI model did not detect visible signs of diabetic retinopathy in the uploaded retinal image.",
 
-gap = model.layers[1]
+        "next_steps": [
+            "Continue regular diabetes management.",
+            "Maintain healthy blood glucose, blood pressure and cholesterol levels.",
+            "Continue routine eye examinations as recommended by an eye-care professional."
+        ]
+    },
 
-dense1 = model.layers[2]
+    1: {
+        "name": "Mild Diabetic Retinopathy",
 
-drop1 = model.layers[3]
+        "description":
+            "The AI model detected patterns that may be consistent with mild diabetic retinopathy.",
 
-dense2 = model.layers[4]
+        "next_steps": [
+            "Schedule an eye examination with an eye-care professional.",
+            "Maintain good blood glucose control.",
+            "Monitor blood pressure and cholesterol.",
+            "Follow the screening schedule recommended by your doctor."
+        ]
+    },
 
-drop2 = model.layers[5]
+    2: {
+        "name": "Moderate Diabetic Retinopathy",
 
-pred_layer = model.layers[6]
+        "description":
+            "The AI model detected retinal patterns that may be consistent with moderate diabetic retinopathy.",
 
+        "next_steps": [
+            "Consult an eye-care professional for further evaluation.",
+            "Maintain good blood glucose control.",
+            "Monitor blood pressure and cholesterol carefully.",
+            "Follow the treatment and follow-up schedule recommended by your doctor."
+        ]
+    },
 
-def classifier_from_features(features):
+    3: {
+        "name": "Severe Diabetic Retinopathy",
 
-    x = gap(features)
+        "description":
+            "The AI model detected patterns that may be consistent with severe diabetic retinopathy.",
 
-    x = dense1(x)
+        "next_steps": [
+            "Seek professional eye evaluation as soon as possible.",
+            "Follow your doctor's recommendations for further retinal examination.",
+            "Maintain careful blood glucose, blood pressure and cholesterol control.",
+            "Do not delay professional assessment based only on this AI result."
+        ]
+    },
 
-    x = drop1(
-        x,
-        training=False
-    )
+    4: {
+        "name": "Proliferative Diabetic Retinopathy",
 
-    x = dense2(x)
+        "description":
+            "The AI model detected patterns that may be consistent with proliferative diabetic retinopathy.",
 
-    x = drop2(
-        x,
-        training=False
-    )
-
-    predictions = pred_layer(x)
-
-    return predictions
+        "next_steps": [
+            "Seek prompt evaluation from an eye-care professional.",
+            "Follow specialist recommendations for further retinal examination.",
+            "Maintain careful diabetes and blood pressure management.",
+            "Do not rely on the AI result as a medical diagnosis."
+        ]
+    }
+}
 
 
 # ============================================================
@@ -318,319 +186,385 @@ def classifier_from_features(features):
 
 def preprocess_image(image):
 
-    print("Preprocessing image...")
-
+    # Convert to RGB
     image = image.convert("RGB")
 
+    # Resize to model input size
     image = image.resize(
         (224, 224),
         Image.Resampling.BILINEAR
     )
 
-    image = np.array(
+    # Convert to float32
+    image_array = np.asarray(
         image,
         dtype=np.float32
     )
 
-    image = np.expand_dims(
-        image,
+    # EfficientNetB0 in this Keras setup
+    # expects pixel values in the 0-255 range.
+    image_array = np.expand_dims(
+        image_array,
         axis=0
     )
 
-    print(
-        "Image shape:",
-        image.shape
-    )
-
-    return image
+    return image_array
 
 
 # ============================================================
-# GRAD-CAM
+# COLORED GRAD-CAM
 # ============================================================
 
-def generate_gradcam_from_features(
-    conv_outputs,
-    predicted_class,
-    original
+def generate_gradcam(
+    image_array,
+    predicted_class
 ):
 
-    print("Starting Grad-CAM...")
+    # Build a temporary Grad-CAM model.
+    #
+    # It returns:
+    # 1. Last convolutional feature maps
+    # 2. Final model predictions
+    #
+    # This keeps the Grad-CAM calculation in one forward pass.
 
-    try:
-
-        with tf.GradientTape() as tape:
-
-            tape.watch(
-                conv_outputs
-            )
-
-            predictions = classifier_from_features(
-                conv_outputs
-            )
-
-            class_output = predictions[
-                0,
-                predicted_class
-            ]
-
-        print(
-            "Calculating Grad-CAM gradients..."
-        )
-
-        grads = tape.gradient(
-            class_output,
-            conv_outputs
-        )
-
-        if grads is None:
-
-            print(
-                "Grad-CAM gradients are None."
-            )
-
-            return None
-
-        pooled_grads = tf.reduce_mean(
-            grads,
-            axis=(0, 1, 2)
-        )
-
-        conv_output = conv_outputs[0]
-
-        heatmap = tf.reduce_sum(
-            conv_output * pooled_grads,
-            axis=-1
-        )
-
-        heatmap = tf.maximum(
-            heatmap,
-            0
-        )
-
-        max_value = tf.reduce_max(
-            heatmap
-        )
-
-        max_value = float(
-            max_value.numpy()
-        )
-
-        if max_value <= 0:
-
-            print(
-                "Grad-CAM heatmap is empty."
-            )
-
-            return None
-
-        heatmap = (
-            heatmap /
-            max_value
-        )
-
-        heatmap = heatmap.numpy()
-
-        height, width = (
-            original.shape[:2]
-        )
-
-        heatmap = cv2.resize(
-            heatmap,
-            (width, height),
-            interpolation=cv2.INTER_LINEAR
-        )
-
-        heatmap_uint8 = np.uint8(
-            255 *
-            np.clip(
-                heatmap,
-                0,
-                1
-            )
-        )
-
-        heatmap_color = cv2.applyColorMap(
-            heatmap_uint8,
-            cv2.COLORMAP_JET
-        )
-
-        heatmap_color = cv2.cvtColor(
-            heatmap_color,
-            cv2.COLOR_BGR2RGB
-        )
-
-        overlay = cv2.addWeighted(
-            original,
-            0.6,
-            heatmap_color,
-            0.4,
-            0
-        )
-
-        combined = np.concatenate(
-            [
-                original,
-                heatmap_color,
-                overlay
-            ],
-            axis=1
-        )
-
-        success, buffer = cv2.imencode(
-            ".jpg",
-            cv2.cvtColor(
-                combined,
-                cv2.COLOR_RGB2BGR
-            ),
-            [
-                cv2.IMWRITE_JPEG_QUALITY,
-                70
-            ]
-        )
-
-        if not success:
-
-            print(
-                "Could not encode Grad-CAM."
-            )
-
-            return None
-
-        gradcam_base64 = base64.b64encode(
-            buffer
-        ).decode("utf-8")
-
-        print(
-            "Grad-CAM completed successfully."
-        )
-
-        del predictions
-        del grads
-        del pooled_grads
-        del conv_output
-        del heatmap
-        del heatmap_uint8
-        del heatmap_color
-        del overlay
-        del combined
-
-        gc.collect()
-
-        return gradcam_base64
-
-    except Exception as e:
-
-        print(
-            "Grad-CAM error:",
-            str(e)
-        )
-
-        gc.collect()
-
-        return None
-
-
-# ============================================================
-# PREDICTION API
-# ============================================================
-
-@app.route(
-    "/predict",
-    methods=[
-        "POST",
-        "OPTIONS"
-    ]
-)
-def predict():
-
-    if request.method == "OPTIONS":
-
-        return jsonify({
-            "message":
-                "CORS preflight successful"
-        })
-
-    print("")
-    print(
-        "=========================================="
-    )
-    print(
-        "PREDICT REQUEST RECEIVED"
-    )
-    print(
-        "=========================================="
+    grad_model = Model(
+        inputs=model.input,
+        outputs=[
+            last_conv_layer.output,
+            model.output
+        ]
     )
 
-    if "image" not in request.files:
+    # Convert numpy image to Tensor
+    image_tensor = tf.convert_to_tensor(
+        image_array,
+        dtype=tf.float32
+    )
 
-        print(
-            "ERROR: NO IMAGE IN REQUEST"
-        )
+    # Gradient calculation
+    with tf.GradientTape() as tape:
 
-        return jsonify({
-            "error":
-                "No image uploaded"
-        }), 400
-
-    try:
-
-        file = request.files["image"]
-
-        print(
-            "Filename:",
-            file.filename
-        )
-
-        image = Image.open(
-            file.stream
-        ).convert("RGB")
-
-        print(
-            "Image opened successfully."
-        )
-
-        img_input = preprocess_image(
-            image
-        )
-
-        # ----------------------------------------------------
-        # Feature extraction
-        # ----------------------------------------------------
-
-        print(
-            "Running EfficientNet feature extraction..."
-        )
-
-        conv_outputs = feature_model(
-            img_input,
+        conv_outputs, predictions = grad_model(
+            image_tensor,
             training=False
         )
 
-        print(
-            "Feature extraction completed."
+        # Make sure feature maps are watched
+        tape.watch(conv_outputs)
+
+        class_score = predictions[
+            :,
+            predicted_class
+        ]
+
+    # Gradient of predicted class
+    grads = tape.gradient(
+        class_score,
+        conv_outputs
+    )
+
+    if grads is None:
+        del grad_model
+        del image_tensor
+        gc.collect()
+        return None
+
+    # Average gradients across width/height
+    pooled_grads = tf.reduce_mean(
+        grads,
+        axis=(1, 2)
+    )
+
+    # Remove batch dimension
+    conv_output = conv_outputs[0]
+
+    pooled_grad = pooled_grads[0]
+
+    # Weight feature maps
+    heatmap = tf.reduce_sum(
+        conv_output * pooled_grad,
+        axis=-1
+    )
+
+    # ReLU
+    heatmap = tf.maximum(
+        heatmap,
+        0
+    )
+
+    # Normalize
+    max_value = tf.reduce_max(
+        heatmap
+    )
+
+    heatmap = heatmap / (
+        max_value + 1e-8
+    )
+
+    # Convert to numpy
+    heatmap = heatmap.numpy()
+
+    # ========================================================
+    # CREATE COLOR HEATMAP
+    # ========================================================
+
+    heatmap_image = Image.fromarray(
+        np.uint8(
+            heatmap * 255
+        )
+    )
+
+    # Resize to original display size
+    heatmap_image = heatmap_image.resize(
+        (224, 224),
+        Image.Resampling.BILINEAR
+    )
+
+    # ========================================================
+    # CREATE COLOR MAP
+    #
+    # We create a classic blue -> cyan -> green ->
+    # yellow -> red style heatmap.
+    # ========================================================
+
+    heatmap_array = np.asarray(
+        heatmap_image,
+        dtype=np.float32
+    ) / 255.0
+
+    # Red channel
+    red = np.clip(
+        2.0 * heatmap_array,
+        0,
+        1
+    )
+
+    # Green channel
+    green = np.clip(
+        2.0 - np.abs(
+            2.0 * heatmap_array - 1.0
+        ),
+        0,
+        1
+    )
+
+    # Blue channel
+    blue = np.clip(
+        2.0 * (
+            1.0 - heatmap_array
+        ),
+        0,
+        1
+    )
+
+    colored_heatmap = np.stack(
+        [
+            red,
+            green,
+            blue
+        ],
+        axis=-1
+    )
+
+    colored_heatmap = np.uint8(
+        colored_heatmap * 255
+    )
+
+    heatmap_rgb = Image.fromarray(
+        colored_heatmap
+    ).convert("RGB")
+
+
+    # ========================================================
+    # ORIGINAL IMAGE
+    # ========================================================
+
+    original_array = np.uint8(
+        np.clip(
+            image_array[0],
+            0,
+            255
+        )
+    )
+
+    original_image = Image.fromarray(
+        original_array
+    ).convert("RGB")
+
+
+    # ========================================================
+    # CREATE OVERLAY
+    # ========================================================
+
+    overlay = Image.blend(
+        original_image,
+        heatmap_rgb,
+        alpha=0.45
+    )
+
+
+    # ========================================================
+    # CREATE THREE-PANEL IMAGE
+    #
+    # Original | Heatmap | Overlay
+    # ========================================================
+
+    combined = Image.new(
+        "RGB",
+        (
+            224 * 3,
+            224
+        )
+    )
+
+    combined.paste(
+        original_image,
+        (0, 0)
+    )
+
+    combined.paste(
+        heatmap_rgb,
+        (224, 0)
+    )
+
+    combined.paste(
+        overlay,
+        (448, 0)
+    )
+
+
+    # ========================================================
+    # COMPRESS RESULT
+    # ========================================================
+
+    output = io.BytesIO()
+
+    combined.save(
+        output,
+        format="JPEG",
+        quality=60,
+        optimize=True
+    )
+
+    output.seek(0)
+
+    encoded_image = base64.b64encode(
+        output.read()
+    ).decode("utf-8")
+
+
+    # ========================================================
+    # CLEAN MEMORY
+    # ========================================================
+
+    del grad_model
+    del image_tensor
+    del conv_outputs
+    del predictions
+    del grads
+    del pooled_grads
+    del heatmap
+    del heatmap_array
+    del colored_heatmap
+    del heatmap_rgb
+    del overlay
+    del combined
+    del output
+
+    gc.collect()
+
+    return encoded_image
+
+
+# ============================================================
+# HEALTH CHECK
+# ============================================================
+
+@app.route("/health", methods=["GET"])
+def health():
+
+    return jsonify({
+        "status": "ok",
+        "model": "EfficientNetB0",
+        "accuracy": "85.29%"
+    })
+
+
+# ============================================================
+# HOME
+# ============================================================
+
+@app.route("/", methods=["GET"])
+def home():
+
+    return jsonify({
+        "message":
+            "AI Diabetic Retinopathy backend is running.",
+        "endpoint":
+            "/predict"
+    })
+
+
+# ============================================================
+# PREDICTION
+# ============================================================
+
+@app.route("/predict", methods=["POST"])
+def predict():
+
+    try:
+
+        # ====================================================
+        # CHECK FILE
+        # ====================================================
+
+        if "image" not in request.files:
+
+            return jsonify({
+                "error":
+                    "No image file was uploaded."
+            }), 400
+
+
+        uploaded_file = request.files["image"]
+
+
+        if uploaded_file.filename == "":
+
+            return jsonify({
+                "error":
+                    "No image was selected."
+            }), 400
+
+
+        # ====================================================
+        # OPEN IMAGE
+        # ====================================================
+
+        image = Image.open(
+            uploaded_file.stream
+        ).convert("RGB")
+
+
+        # ====================================================
+        # PREPROCESS
+        # ====================================================
+
+        image_array = preprocess_image(
+            image
         )
 
-        # ----------------------------------------------------
-        # Prediction
-        # ----------------------------------------------------
 
-        print(
-            "Starting AI prediction..."
+        # ====================================================
+        # MODEL PREDICTION
+        # ====================================================
+
+        predictions = model.predict(
+            image_array,
+            verbose=0
         )
 
-        predictions_tensor = classifier_from_features(
-            conv_outputs
-        )
-
-        predictions = (
-            predictions_tensor.numpy()
-        )
-
-        print(
-            "Raw prediction:",
-            predictions
-        )
 
         predicted_class = int(
             np.argmax(
@@ -638,89 +572,46 @@ def predict():
             )
         )
 
+
         confidence = float(
             predictions[0][
                 predicted_class
             ] * 100
         )
 
-        prediction_name = class_names[
+
+        # ====================================================
+        # DISEASE INFORMATION
+        # ====================================================
+
+        info = disease_info[
             predicted_class
         ]
 
-        print(
-            "Prediction:",
-            prediction_name
+
+        # ====================================================
+        # GRAD-CAM
+        # ====================================================
+
+        gradcam = generate_gradcam(
+            image_array,
+            predicted_class
         )
 
-        print(
-            "Confidence:",
-            confidence
-        )
 
-        # ----------------------------------------------------
-        # Disease information
-        # ----------------------------------------------------
+        # ====================================================
+        # RESPONSE
+        # ====================================================
 
-        info = disease_info.get(
-            prediction_name,
-            {
-                "description":
-                    "Prediction completed.",
-
-                "next_steps": [
-                    "Please consult a qualified eye-care professional for medical interpretation."
-                ]
-            }
-        )
-
-        # ----------------------------------------------------
-        # Original image
-        # ----------------------------------------------------
-
-        original = img_input[
-            0
-        ].astype(
-            np.uint8
-        )
-
-        # ----------------------------------------------------
-        # Grad-CAM
-        # ----------------------------------------------------
-
-        print(
-            "Generating Grad-CAM..."
-        )
-
-        gradcam = generate_gradcam_from_features(
-            conv_outputs,
-            predicted_class,
-            original
-        )
-
-        if gradcam is not None:
-
-            print(
-                "Grad-CAM generated successfully."
-            )
-
-        else:
-
-            print(
-                "Grad-CAM unavailable."
-            )
-
-        # ----------------------------------------------------
-        # Response
-        # ----------------------------------------------------
-
-        response_data = {
-
+        response = {
             "prediction":
-                prediction_name,
+                info["name"],
 
             "confidence":
-                confidence,
+                round(
+                    confidence,
+                    2
+                ),
 
             "description":
                 info["description"],
@@ -732,104 +623,55 @@ def predict():
                 gradcam
         }
 
-        print(
-            "Sending response to frontend..."
-        )
 
-        del predictions_tensor
-        del predictions
-        del conv_outputs
-        del img_input
+        # ====================================================
+        # CLEAN MEMORY
+        # ====================================================
+
         del image
-        del original
+        del image_array
+        del predictions
 
         gc.collect()
 
-        print(
-            "Response ready."
-        )
-
-        print(
-            "=========================================="
-        )
 
         return jsonify(
-            response_data
+            response
         )
+
 
     except Exception as e:
 
-        print("")
         print(
-            "=========================================="
-        )
-        print(
-            "ERROR DURING PREDICTION"
-        )
-        print(
-            "=========================================="
-        )
-
-        print(
-            "ERROR:",
-            str(e)
+            "Prediction error:",
+            repr(e)
         )
 
         gc.collect()
 
         return jsonify({
             "error":
+                "Unable to analyze the image.",
+            "details":
                 str(e)
         }), 500
 
 
 # ============================================================
-# HEALTH CHECK
-# ============================================================
-
-@app.route(
-    "/health",
-    methods=["GET"]
-)
-def health():
-
-    return jsonify({
-
-        "status":
-            "healthy",
-
-        "model":
-            "EfficientNetB0",
-
-        "message":
-            "AI Diabetic Retinopathy backend is running."
-
-    })
-
-
-# ============================================================
-# HOME
-# ============================================================
-
-@app.route("/")
-def home():
-
-    return jsonify({
-
-        "message":
-            "AI Diabetic Retinopathy Backend is running!"
-
-    })
-
-
-# ============================================================
-# LOCAL DEVELOPMENT
+# RUN APP
 # ============================================================
 
 if __name__ == "__main__":
 
+    port = int(
+        os.environ.get(
+            "PORT",
+            5000
+        )
+    )
+
     app.run(
-        host="127.0.0.1",
-        port=5000,
-        debug=True
+        host="0.0.0.0",
+        port=port,
+        debug=False
     )

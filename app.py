@@ -17,7 +17,15 @@ import gc
 # ==========================================
 
 app = Flask(__name__)
-CORS(app)
+
+CORS(
+    app,
+    resources={
+        r"/*": {
+            "origins": "*"
+        }
+    }
+)
 
 
 # ==========================================
@@ -72,6 +80,7 @@ def download_model():
         ):
 
             if chunk:
+
                 file.write(chunk)
 
     print("Model downloaded successfully!")
@@ -114,6 +123,7 @@ base_model = model.layers[0]
 
 last_conv_layer = None
 
+
 for layer in reversed(base_model.layers):
 
     if isinstance(
@@ -140,7 +150,7 @@ print(
 
 
 # ==========================================
-# CREATE FEATURE MODEL ONLY ONCE
+# FEATURE MODEL
 # ==========================================
 
 feature_model = tf.keras.models.Model(
@@ -154,12 +164,21 @@ feature_model = tf.keras.models.Model(
 # ==========================================
 
 gap = model.layers[1]
+
 dense1 = model.layers[2]
+
 drop1 = model.layers[3]
+
 dense2 = model.layers[4]
+
 drop2 = model.layers[5]
+
 pred_layer = model.layers[6]
 
+
+# ==========================================
+# CLASSIFIER FROM FEATURES
+# ==========================================
 
 def classifier_from_features(features):
 
@@ -190,6 +209,8 @@ def classifier_from_features(features):
 
 def preprocess_image(image):
 
+    print("Preprocessing image...")
+
     image = image.convert("RGB")
 
     image = image.resize(
@@ -206,6 +227,11 @@ def preprocess_image(image):
         axis=0
     )
 
+    print(
+        "Image shape:",
+        image.shape
+    )
+
     return image
 
 
@@ -214,6 +240,8 @@ def preprocess_image(image):
 # ==========================================
 
 def generate_gradcam(img_input):
+
+    print("Starting Grad-CAM...")
 
     with tf.GradientTape() as tape:
 
@@ -238,9 +266,8 @@ def generate_gradcam(img_input):
         ]
 
 
-    # ======================================
-    # CALCULATE GRADIENTS
-    # ======================================
+    print("Calculating Grad-CAM gradients...")
+
 
     grads = tape.gradient(
         class_output,
@@ -263,10 +290,6 @@ def generate_gradcam(img_input):
 
     conv_outputs = conv_outputs[0]
 
-
-    # ======================================
-    # CREATE HEATMAP
-    # ======================================
 
     heatmap = tf.reduce_sum(
         conv_outputs * pooled_grads,
@@ -322,7 +345,7 @@ def generate_gradcam(img_input):
 
 
     # ======================================
-    # APPLY COLOR MAP
+    # COLOR MAP
     # ======================================
 
     heatmap_color = cv2.applyColorMap(
@@ -338,7 +361,7 @@ def generate_gradcam(img_input):
 
 
     # ======================================
-    # CREATE OVERLAY
+    # OVERLAY
     # ======================================
 
     overlay = np.uint8(
@@ -348,7 +371,7 @@ def generate_gradcam(img_input):
 
 
     # ======================================
-    # ORIGINAL + HEATMAP + OVERLAY
+    # COMBINE IMAGES
     # ======================================
 
     combined = np.concatenate(
@@ -362,7 +385,7 @@ def generate_gradcam(img_input):
 
 
     # ======================================
-    # CONVERT TO PNG
+    # PNG
     # ======================================
 
     success, buffer = cv2.imencode(
@@ -382,7 +405,7 @@ def generate_gradcam(img_input):
 
 
     # ======================================
-    # CONVERT TO BASE64
+    # BASE64
     # ======================================
 
     gradcam_base64 = base64.b64encode(
@@ -390,14 +413,18 @@ def generate_gradcam(img_input):
     ).decode("utf-8")
 
 
+    print("Grad-CAM completed.")
+
+
     # ======================================
-    # MEMORY CLEANUP
+    # CLEANUP
     # ======================================
 
     del conv_outputs
     del grads
     del pooled_grads
     del heatmap
+    del combined
 
     gc.collect()
 
@@ -415,44 +442,81 @@ def generate_gradcam(img_input):
 )
 def predict():
 
+    print("")
+    print("==========================================")
+    print("PREDICT REQUEST RECEIVED")
+    print("==========================================")
+
+
+    # ======================================
+    # CHECK IMAGE
+    # ======================================
+
     if "image" not in request.files:
+
+        print("ERROR: NO IMAGE IN REQUEST")
 
         return jsonify({
             "error": "No image uploaded"
         }), 400
 
 
+    print("Image received successfully.")
+
+
     try:
+
+        # ==================================
+        # GET FILE
+        # ==================================
 
         file = request.files["image"]
 
 
-        # ======================================
+        print(
+            "Filename:",
+            file.filename
+        )
+
+
+        # ==================================
         # OPEN IMAGE
-        # ======================================
+        # ==================================
 
         image = Image.open(
             file.stream
         ).convert("RGB")
 
 
-        # ======================================
-        # PREPROCESS IMAGE
-        # ======================================
+        print("Image opened successfully.")
+
+
+        # ==================================
+        # PREPROCESS
+        # ==================================
 
         img_input = preprocess_image(
             image
         )
 
 
-        # ======================================
+        # ==================================
         # AI PREDICTION
-        # ======================================
+        # ==================================
+
+        print("Starting AI prediction...")
+
 
         predictions = model(
             img_input,
             training=False
         ).numpy()
+
+
+        print(
+            "Raw prediction:",
+            predictions
+        )
 
 
         predicted_class = int(
@@ -480,18 +544,24 @@ def predict():
         )
 
 
-        # ======================================
+        # ==================================
         # GRAD-CAM
-        # ======================================
+        # ==================================
+
+        print("Generating Grad-CAM...")
+
 
         gradcam = generate_gradcam(
             img_input
         )
 
 
-        # ======================================
-        # MEMORY CLEANUP
-        # ======================================
+        print("Grad-CAM generated successfully.")
+
+
+        # ==================================
+        # CLEANUP
+        # ==================================
 
         del img_input
         del predictions
@@ -499,11 +569,14 @@ def predict():
         gc.collect()
 
 
-        # ======================================
-        # SEND RESULT
-        # ======================================
+        # ==================================
+        # RESPONSE
+        # ==================================
 
-        return jsonify({
+        print("Sending response to frontend...")
+
+
+        response_data = {
 
             "prediction":
                 class_names[predicted_class],
@@ -514,10 +587,23 @@ def predict():
             "gradcam":
                 gradcam
 
-        })
+        }
+
+
+        print("Response ready.")
+
+
+        return jsonify(
+            response_data
+        )
 
 
     except Exception as e:
+
+        print("")
+        print("==========================================")
+        print("ERROR DURING PREDICTION")
+        print("==========================================")
 
         print(
             "ERROR:",

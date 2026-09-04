@@ -1,7 +1,7 @@
 import os
 import gc
-import base64
 import io
+import base64
 
 import numpy as np
 import tensorflow as tf
@@ -15,23 +15,19 @@ from tensorflow.keras.layers import Conv2D
 
 
 # ============================================================
-# FLASK APP
+# FLASK
 # ============================================================
 
 app = Flask(__name__)
-
-# Allow frontend requests
 CORS(app)
 
-# Maximum uploaded image size: 10 MB
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 
 
 # ============================================================
-# TENSORFLOW MEMORY / CPU SETTINGS
+# TENSORFLOW
 # ============================================================
 
-# Keep TensorFlow from creating unnecessary thread pools
 tf.config.threading.set_intra_op_parallelism_threads(1)
 tf.config.threading.set_inter_op_parallelism_threads(1)
 
@@ -40,17 +36,51 @@ tf.config.threading.set_inter_op_parallelism_threads(1)
 # MODEL PATH
 # ============================================================
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+MODEL_NAME = "best_ai_dr_efficientnetb0_85_29.keras"
+
 MODEL_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "best_ai_dr_efficientnetb0_85_29.keras"
+    BASE_DIR,
+    MODEL_NAME
 )
+
+print("========================================")
+print("AI DR BACKEND STARTING")
+print("========================================")
+
+print("Current directory:", os.getcwd())
+print("App directory:", BASE_DIR)
+print("Expected model:", MODEL_PATH)
+
+
+# ============================================================
+# MODEL CHECK
+# ============================================================
+
+if not os.path.isfile(MODEL_PATH):
+
+    print("MODEL NOT FOUND")
+    print("Looking for:", MODEL_PATH)
+    print("Files in app directory:")
+
+    try:
+        print(os.listdir(BASE_DIR))
+    except Exception as e:
+        print("Could not list directory:", e)
+
+    raise FileNotFoundError(
+        f"Model file not found: {MODEL_PATH}"
+    )
+
+
+print("Model file found.")
+print("Loading model...")
 
 
 # ============================================================
 # LOAD MODEL
 # ============================================================
-
-print("Loading AI Diabetic Retinopathy model...")
 
 model = load_model(
     MODEL_PATH,
@@ -58,6 +88,7 @@ model = load_model(
 )
 
 print("Model loaded successfully.")
+print("========================================")
 
 
 # ============================================================
@@ -66,14 +97,17 @@ print("Model loaded successfully.")
 
 last_conv_layer = None
 
+
+# Search top-level layers
 for layer in reversed(model.layers):
+
     if isinstance(layer, Conv2D):
+
         last_conv_layer = layer
         break
 
-# EfficientNet is nested inside Sequential model,
-# so search inside the base model if needed.
 
+# Search nested model
 if last_conv_layer is None:
 
     for layer in model.layers:
@@ -82,7 +116,10 @@ if last_conv_layer is None:
 
             for inner_layer in reversed(layer.layers):
 
-                if isinstance(inner_layer, Conv2D):
+                if isinstance(
+                    inner_layer,
+                    Conv2D
+                ):
 
                     last_conv_layer = inner_layer
                     break
@@ -92,8 +129,9 @@ if last_conv_layer is None:
 
 
 if last_conv_layer is None:
+
     raise RuntimeError(
-        "Could not find a convolutional layer for Grad-CAM."
+        "Could not find convolutional layer for Grad-CAM."
     )
 
 
@@ -181,28 +219,23 @@ disease_info = {
 
 
 # ============================================================
-# IMAGE PREPROCESSING
+# PREPROCESSING
 # ============================================================
 
 def preprocess_image(image):
 
-    # Convert to RGB
     image = image.convert("RGB")
 
-    # Resize to model input size
     image = image.resize(
         (224, 224),
         Image.Resampling.BILINEAR
     )
 
-    # Convert to float32
     image_array = np.asarray(
         image,
         dtype=np.float32
     )
 
-    # EfficientNetB0 in this Keras setup
-    # expects pixel values in the 0-255 range.
     image_array = np.expand_dims(
         image_array,
         axis=0
@@ -212,21 +245,13 @@ def preprocess_image(image):
 
 
 # ============================================================
-# COLORED GRAD-CAM
+# GRAD-CAM
 # ============================================================
 
 def generate_gradcam(
     image_array,
     predicted_class
 ):
-
-    # Build a temporary Grad-CAM model.
-    #
-    # It returns:
-    # 1. Last convolutional feature maps
-    # 2. Final model predictions
-    #
-    # This keeps the Grad-CAM calculation in one forward pass.
 
     grad_model = Model(
         inputs=model.input,
@@ -236,13 +261,11 @@ def generate_gradcam(
         ]
     )
 
-    # Convert numpy image to Tensor
     image_tensor = tf.convert_to_tensor(
         image_array,
         dtype=tf.float32
     )
 
-    # Gradient calculation
     with tf.GradientTape() as tape:
 
         conv_outputs, predictions = grad_model(
@@ -250,7 +273,6 @@ def generate_gradcam(
             training=False
         )
 
-        # Make sure feature maps are watched
         tape.watch(conv_outputs)
 
         class_score = predictions[
@@ -258,55 +280,61 @@ def generate_gradcam(
             predicted_class
         ]
 
-    # Gradient of predicted class
     grads = tape.gradient(
         class_score,
         conv_outputs
     )
 
     if grads is None:
+
         del grad_model
         del image_tensor
+
         gc.collect()
+
         return None
 
-    # Average gradients across width/height
+
+    # Average gradients
     pooled_grads = tf.reduce_mean(
         grads,
         axis=(1, 2)
     )
 
-    # Remove batch dimension
+
     conv_output = conv_outputs[0]
 
     pooled_grad = pooled_grads[0]
 
-    # Weight feature maps
+
+    # Create heatmap
     heatmap = tf.reduce_sum(
         conv_output * pooled_grad,
         axis=-1
     )
 
-    # ReLU
+
     heatmap = tf.maximum(
         heatmap,
         0
     )
 
-    # Normalize
+
     max_value = tf.reduce_max(
         heatmap
     )
+
 
     heatmap = heatmap / (
         max_value + 1e-8
     )
 
-    # Convert to numpy
+
     heatmap = heatmap.numpy()
 
+
     # ========================================================
-    # CREATE COLOR HEATMAP
+    # HEATMAP RESIZE
     # ========================================================
 
     heatmap_image = Image.fromarray(
@@ -315,17 +343,14 @@ def generate_gradcam(
         )
     )
 
-    # Resize to original display size
     heatmap_image = heatmap_image.resize(
         (224, 224),
         Image.Resampling.BILINEAR
     )
 
+
     # ========================================================
-    # CREATE COLOR MAP
-    #
-    # We create a classic blue -> cyan -> green ->
-    # yellow -> red style heatmap.
+    # COLOR HEATMAP
     # ========================================================
 
     heatmap_array = np.asarray(
@@ -333,23 +358,24 @@ def generate_gradcam(
         dtype=np.float32
     ) / 255.0
 
-    # Red channel
+
     red = np.clip(
         2.0 * heatmap_array,
         0,
         1
     )
 
-    # Green channel
+
     green = np.clip(
-        2.0 - np.abs(
+        2.0 -
+        np.abs(
             2.0 * heatmap_array - 1.0
         ),
         0,
         1
     )
 
-    # Blue channel
+
     blue = np.clip(
         2.0 * (
             1.0 - heatmap_array
@@ -357,6 +383,7 @@ def generate_gradcam(
         0,
         1
     )
+
 
     colored_heatmap = np.stack(
         [
@@ -367,9 +394,11 @@ def generate_gradcam(
         axis=-1
     )
 
+
     colored_heatmap = np.uint8(
         colored_heatmap * 255
     )
+
 
     heatmap_rgb = Image.fromarray(
         colored_heatmap
@@ -388,13 +417,14 @@ def generate_gradcam(
         )
     )
 
+
     original_image = Image.fromarray(
         original_array
     ).convert("RGB")
 
 
     # ========================================================
-    # CREATE OVERLAY
+    # OVERLAY
     # ========================================================
 
     overlay = Image.blend(
@@ -405,28 +435,26 @@ def generate_gradcam(
 
 
     # ========================================================
-    # CREATE THREE-PANEL IMAGE
-    #
-    # Original | Heatmap | Overlay
+    # THREE PANEL
     # ========================================================
 
     combined = Image.new(
         "RGB",
-        (
-            224 * 3,
-            224
-        )
+        (672, 224)
     )
+
 
     combined.paste(
         original_image,
         (0, 0)
     )
 
+
     combined.paste(
         heatmap_rgb,
         (224, 0)
     )
+
 
     combined.paste(
         overlay,
@@ -435,7 +463,7 @@ def generate_gradcam(
 
 
     # ========================================================
-    # COMPRESS RESULT
+    # JPEG
     # ========================================================
 
     output = io.BytesIO()
@@ -449,13 +477,14 @@ def generate_gradcam(
 
     output.seek(0)
 
+
     encoded_image = base64.b64encode(
         output.read()
     ).decode("utf-8")
 
 
     # ========================================================
-    # CLEAN MEMORY
+    # CLEANUP
     # ========================================================
 
     del grad_model
@@ -474,11 +503,12 @@ def generate_gradcam(
 
     gc.collect()
 
+
     return encoded_image
 
 
 # ============================================================
-# HEALTH CHECK
+# HEALTH
 # ============================================================
 
 @app.route("/health", methods=["GET"])
@@ -507,7 +537,7 @@ def home():
 
 
 # ============================================================
-# PREDICTION
+# PREDICT
 # ============================================================
 
 @app.route("/predict", methods=["POST"])
@@ -515,10 +545,7 @@ def predict():
 
     try:
 
-        # ====================================================
-        # CHECK FILE
-        # ====================================================
-
+        # Check uploaded image
         if "image" not in request.files:
 
             return jsonify({
@@ -538,28 +565,19 @@ def predict():
             }), 400
 
 
-        # ====================================================
-        # OPEN IMAGE
-        # ====================================================
-
+        # Open image
         image = Image.open(
             uploaded_file.stream
         ).convert("RGB")
 
 
-        # ====================================================
-        # PREPROCESS
-        # ====================================================
-
+        # Preprocess
         image_array = preprocess_image(
             image
         )
 
 
-        # ====================================================
-        # MODEL PREDICTION
-        # ====================================================
-
+        # Prediction
         predictions = model.predict(
             image_array,
             verbose=0
@@ -580,30 +598,22 @@ def predict():
         )
 
 
-        # ====================================================
-        # DISEASE INFORMATION
-        # ====================================================
-
+        # Disease information
         info = disease_info[
             predicted_class
         ]
 
 
-        # ====================================================
-        # GRAD-CAM
-        # ====================================================
-
+        # Grad-CAM
         gradcam = generate_gradcam(
             image_array,
             predicted_class
         )
 
 
-        # ====================================================
-        # RESPONSE
-        # ====================================================
-
+        # Response
         response = {
+
             "prediction":
                 info["name"],
 
@@ -624,10 +634,7 @@ def predict():
         }
 
 
-        # ====================================================
-        # CLEAN MEMORY
-        # ====================================================
-
+        # Cleanup
         del image
         del image_array
         del predictions
@@ -635,9 +642,7 @@ def predict():
         gc.collect()
 
 
-        return jsonify(
-            response
-        )
+        return jsonify(response)
 
 
     except Exception as e:
@@ -650,15 +655,18 @@ def predict():
         gc.collect()
 
         return jsonify({
+
             "error":
                 "Unable to analyze the image.",
+
             "details":
                 str(e)
+
         }), 500
 
 
 # ============================================================
-# RUN APP
+# RUN
 # ============================================================
 
 if __name__ == "__main__":

@@ -1,3 +1,15 @@
+import os
+import requests
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import tensorflow as tf
+import numpy as np
+from PIL import Image
+import base64
+import cv2
+import os
+import requests
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -23,9 +35,24 @@ CORS(app)
 
 MODEL_PATH = "best_ai_dr_efficientnetb0_85_29.keras"
 
-print("Loading AI DR model...")
+MODEL_URL = "https://github.com/chandireddypradeepreddy-cloud/ai-dr-backend/releases/download/v1.0/best_ai_dr_efficientnetb0_85_29.keras"
 
+if not os.path.exists(MODEL_PATH):
+    print("Downloading AI DR model...")
+    
+    response = requests.get(MODEL_URL, stream=True)
+    response.raise_for_status()
+
+    with open(MODEL_PATH, "wb") as file:
+        for chunk in response.iter_content(chunk_size=8192):
+            if chunk:
+                file.write(chunk)
+
+    print("Model downloaded successfully!")
+
+print("Loading AI DR model...")
 model = tf.keras.models.load_model(MODEL_PATH)
+print("AI DR model loaded successfully!")
 
 print("AI DR model loaded successfully!")
 

@@ -112,6 +112,49 @@ class_names = [
 
 
 # --------------------------------------------------
+# Disease information
+# --------------------------------------------------
+
+disease_info = {
+
+    "No Diabetic Retinopathy": {
+        "description":
+            "No visible signs of diabetic retinopathy were detected.",
+        "next_steps":
+            "Continue regular diabetes and eye-health monitoring."
+    },
+
+    "Mild Diabetic Retinopathy": {
+        "description":
+            "Early retinal changes associated with diabetic retinopathy were detected.",
+        "next_steps":
+            "Maintain good blood glucose and blood pressure control and arrange regular eye examinations."
+    },
+
+    "Moderate Diabetic Retinopathy": {
+        "description":
+            "Moderate retinal changes consistent with diabetic retinopathy were detected.",
+        "next_steps":
+            "Consult an eye-care professional for a detailed retinal examination and appropriate follow-up."
+    },
+
+    "Severe Diabetic Retinopathy": {
+        "description":
+            "Significant retinal abnormalities were detected.",
+        "next_steps":
+            "Prompt evaluation by an ophthalmologist is recommended."
+    },
+
+    "Proliferative Diabetic Retinopathy": {
+        "description":
+            "Advanced retinal changes associated with proliferative diabetic retinopathy were detected.",
+        "next_steps":
+            "Prompt ophthalmologist evaluation is recommended because advanced disease may require treatment."
+    }
+}
+
+
+# --------------------------------------------------
 # EfficientNet Grad-CAM setup
 # --------------------------------------------------
 
@@ -123,19 +166,47 @@ print(
 )
 
 
-# Find last convolution layer
+# --------------------------------------------------
+# Find Grad-CAM feature layer
+# --------------------------------------------------
 
-last_conv_layer = None
+try:
 
-for layer in reversed(base_model.layers):
+    last_conv_layer = base_model.get_layer(
+        "top_activation"
+    )
 
-    if isinstance(
-        layer,
-        tf.keras.layers.Conv2D
-    ):
+    print(
+        "Grad-CAM feature layer: top_activation"
+    )
 
-        last_conv_layer = layer
-        break
+except Exception:
+
+    try:
+
+        last_conv_layer = base_model.get_layer(
+            "top_conv"
+        )
+
+        print(
+            "Grad-CAM feature layer: top_conv"
+        )
+
+    except Exception:
+
+        last_conv_layer = None
+
+        for layer in reversed(
+            base_model.layers
+        ):
+
+            if isinstance(
+                layer,
+                tf.keras.layers.Conv2D
+            ):
+
+                last_conv_layer = layer
+                break
 
 
 if last_conv_layer is None:
@@ -151,7 +222,9 @@ print(
 )
 
 
+# --------------------------------------------------
 # Feature model
+# --------------------------------------------------
 
 feature_model = tf.keras.models.Model(
     inputs=base_model.input,
@@ -159,7 +232,9 @@ feature_model = tf.keras.models.Model(
 )
 
 
+# --------------------------------------------------
 # Classification layers
+# --------------------------------------------------
 
 gap = model.layers[1]
 
@@ -174,7 +249,9 @@ drop2 = model.layers[5]
 pred_layer = model.layers[6]
 
 
-def classifier_from_features(features):
+def classifier_from_features(
+    features
+):
 
     x = gap(features)
 
@@ -201,7 +278,9 @@ def classifier_from_features(features):
 # Image preprocessing
 # --------------------------------------------------
 
-def preprocess_image(image):
+def preprocess_image(
+    image
+):
 
     print(
         "Preprocessing image..."
@@ -235,7 +314,7 @@ def preprocess_image(image):
 
 
 # --------------------------------------------------
-# Grad-CAM
+# MEMORY-EFFICIENT GRAD-CAM
 # --------------------------------------------------
 
 def generate_gradcam(
@@ -249,12 +328,26 @@ def generate_gradcam(
 
     try:
 
-        with tf.GradientTape() as tape:
+        # --------------------------------------------------
+        # IMPORTANT:
+        # Generate feature maps OUTSIDE GradientTape.
+        # This greatly reduces memory usage.
+        # --------------------------------------------------
 
-            conv_outputs = feature_model(
-                img_input,
-                training=False
-            )
+        conv_outputs = feature_model(
+            img_input,
+            training=False
+        )
+
+        print(
+            "Feature map generated."
+        )
+
+        # --------------------------------------------------
+        # GradientTape only watches feature map
+        # --------------------------------------------------
+
+        with tf.GradientTape() as tape:
 
             tape.watch(
                 conv_outputs
@@ -287,7 +380,9 @@ def generate_gradcam(
             return None
 
 
+        # --------------------------------------------------
         # Average gradients
+        # --------------------------------------------------
 
         pooled_grads = tf.reduce_mean(
             grads,
@@ -295,12 +390,16 @@ def generate_gradcam(
         )
 
 
+        # --------------------------------------------------
         # Remove batch dimension
+        # --------------------------------------------------
 
         conv_output = conv_outputs[0]
 
 
+        # --------------------------------------------------
         # Weighted feature map
+        # --------------------------------------------------
 
         heatmap = tf.reduce_sum(
             conv_output *
@@ -309,7 +408,9 @@ def generate_gradcam(
         )
 
 
+        # --------------------------------------------------
         # ReLU
+        # --------------------------------------------------
 
         heatmap = tf.maximum(
             heatmap,
@@ -317,20 +418,36 @@ def generate_gradcam(
         )
 
 
+        # --------------------------------------------------
         # Normalize
+        # --------------------------------------------------
 
         max_value = tf.reduce_max(
             heatmap
         )
 
+        max_value = float(
+            max_value.numpy()
+        )
 
-        if float(max_value) > 0:
+        if max_value <= 0:
 
-            heatmap = (
-                heatmap /
-                max_value
+            print(
+                "Grad-CAM heatmap is empty."
             )
 
+            return None
+
+
+        heatmap = (
+            heatmap /
+            max_value
+        )
+
+
+        # --------------------------------------------------
+        # Convert to numpy
+        # --------------------------------------------------
 
         heatmap = heatmap.numpy()
 
@@ -357,13 +474,22 @@ def generate_gradcam(
 
         heatmap = cv2.resize(
             heatmap,
-            (width, height)
+            (width, height),
+            interpolation=cv2.INTER_LINEAR
         )
 
 
+        # --------------------------------------------------
+        # Convert heatmap to 0-255
+        # --------------------------------------------------
+
         heatmap_uint8 = np.uint8(
             255 *
-            heatmap
+            np.clip(
+                heatmap,
+                0,
+                1
+            )
         )
 
 
@@ -397,7 +523,8 @@ def generate_gradcam(
 
 
         # --------------------------------------------------
-        # Combine
+        # Combine:
+        # Original | Heatmap | Explanation
         # --------------------------------------------------
 
         combined = np.concatenate(
@@ -422,7 +549,7 @@ def generate_gradcam(
             ),
             [
                 cv2.IMWRITE_JPEG_QUALITY,
-                80
+                75
             ]
         )
 
@@ -435,6 +562,10 @@ def generate_gradcam(
 
             return None
 
+
+        # --------------------------------------------------
+        # Base64
+        # --------------------------------------------------
 
         gradcam_base64 = base64.b64encode(
             buffer
@@ -453,10 +584,12 @@ def generate_gradcam(
         # --------------------------------------------------
 
         del conv_outputs
+        del predictions
         del grads
         del pooled_grads
         del conv_output
         del heatmap
+        del heatmap_uint8
         del heatmap_color
         del overlay
         del combined
@@ -640,6 +773,30 @@ def predict():
 
 
         # --------------------------------------------------
+        # Disease information
+        # --------------------------------------------------
+
+        info = disease_info.get(
+            prediction_name,
+            {
+                "description":
+                    "Prediction completed.",
+                "next_steps":
+                    "Please consult a qualified eye-care professional for medical interpretation."
+            }
+        )
+
+
+        # --------------------------------------------------
+        # Delete prediction tensor BEFORE Grad-CAM
+        # --------------------------------------------------
+
+        del predictions_tensor
+
+        gc.collect()
+
+
+        # --------------------------------------------------
         # Grad-CAM
         # --------------------------------------------------
 
@@ -674,14 +831,19 @@ def predict():
         response_data = {
 
             "prediction":
-            prediction_name,
+                prediction_name,
 
             "confidence":
-            confidence,
+                confidence,
+
+            "description":
+                info["description"],
+
+            "next_steps":
+                info["next_steps"],
 
             "gradcam":
-            gradcam
-
+                gradcam
         }
 
 
@@ -696,7 +858,6 @@ def predict():
 
         del image
         del img_input
-        del predictions_tensor
         del predictions
 
         gc.collect()
